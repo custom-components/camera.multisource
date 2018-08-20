@@ -7,25 +7,30 @@ https://github.com/custom-components/camera.multisource
 import logging
 import os
 import base64
+import time
 import requests
 import voluptuous as vol
 import homeassistant.helpers.config_validation as cv
-from homeassistant.components.camera import (PLATFORM_SCHEMA, Camera)
+from homeassistant.components.camera import (PLATFORM_SCHEMA, DOMAIN, Camera)
 
-__version__ = '0.0.1'
+__version__ = '0.1.0'
 _LOGGER = logging.getLogger(__name__)
 
 CONF_NAME = 'name'
+CONF_INTERVAL = 'interval'
 CONF_URLS = 'urls'
 CONF_IMAGES = 'images'
 CONF_DIRS = 'dirs'
 
-PLATFOM_NAME = 'Multisource'
-PLATFORM_DATA = str(PLATFOM_NAME).lower() + '_data'
-PLATFORM_IMAGES = str(PLATFOM_NAME).lower() + '_images'
+PLATFORM_NAME = 'Multisource'
+PLATFORM_DATA = str(PLATFORM_NAME).lower() + '_data'
+PLATFORM_IMAGES = str(PLATFORM_NAME).lower() + '_images'
+
+DEFAULT_INTERVAL = 5
 
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
     vol.Optional(CONF_NAME, default=PLATFOM_NAME): cv.string,
+    vol.Optional(CONF_INTERVAL, default=DEFAULT_INTERVAL): cv.string,
     vol.Optional(CONF_URLS, default='None'):
         vol.All(cv.ensure_list, [cv.string]),
     vol.Optional(CONF_IMAGES, default='None'):
@@ -41,41 +46,59 @@ def setup_platform(hass, config, add_devices, discovery_info=None):
     images = config.get(CONF_IMAGES)
     dirs = config.get(CONF_DIRS)
     camera = WebimagesCamera(hass, name, urls, images, dirs)
+
+    def reload_images_service(call):
+        """Reload images."""
+        _LOGGER.debug('Reloading images with service call.')
+        camera.gather_images()
+        return True
+    hass.services.register(DOMAIN,'multisource_reload_images', reload_images_service)
     add_devices([camera])
 
 
 class WebimagesCamera(Camera):
     """Representation of the camera."""
 
-    def __init__(self, hass, name, urls, images, dirs):
+    def __init__(self, hass, name, interval, urls, images, dirs):
         """Initialize Webimages Camera component."""
         super().__init__()
         self.hass = hass
         self._name = name
         self._urls = urls
         self._images = images
+        self._image = None
         self._dirs = dirs
+        self._lastchanged = 0
+        self._interval = int(interval) * 60
         self.is_streaming = False
         self._config_path = self.hass.config.path()
         self.hass.data[PLATFORM_DATA] = {}
         self.hass.data[PLATFORM_DATA]['count'] = 0
         self.gather_images()
+        self.update_feed('init')
 
 
     def camera_image(self):
         """Return image response."""
-        return self.update_feed()
+        return self.update_feed('auto')
 
-    def update_feed(self):
+    def update_feed(self, trigger):
         """Download new image if needed"""
-        total = len(self.hass.data[PLATFORM_IMAGES])
-        count = self.hass.data[PLATFORM_DATA]['count']
-        if count == (total):
-            self.hass.data[PLATFORM_DATA]['count'] = 0
-        else:
-            self.hass.data[PLATFORM_DATA]['count'] = count + 1
-        image = self.hass.data[PLATFORM_IMAGES][count]
-        return base64.b64decode(image)
+        if self._lastchanged == 0:
+            self._lastchanged = time.time()
+        diff = str(time.time() - self._lastchanged)
+        if float(diff) > float(self._interval) or trigger == 'init':
+            _LOGGER.debug('Updating camera feed.')
+            total = len(self.hass.data[PLATFORM_IMAGES])
+            count = self.hass.data[PLATFORM_DATA]['count']
+            if count == (total - 1):
+                self.hass.data[PLATFORM_DATA]['count'] = 0
+            else:
+                self.hass.data[PLATFORM_DATA]['count'] = count + 1
+            image = self.hass.data[PLATFORM_IMAGES][count]
+            self._lastchanged = time.time()
+            self._image = base64.b64decode(image)
+        return self._image
 
     def gather_images(self):
         """Gather images from the different sources"""

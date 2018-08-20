@@ -29,6 +29,12 @@ key | description
 :--- | :---  
 **platform (Required)** | The camera platform name.  
 **name (Optional)** | Set the a custom name for the platform entity.
+**interval (Optional)** | The interval in minutes to fetch new imgages, defaults to `5`.
 **urls (Optional)** | A list of urls to web hosted images.
 **dirs (Optional)** | A list of dirs with images, the path is relative to you HA config dir.
 **files (Optional)** | A list of imagefiles, the path is relative to you HA config dir.
+
+## Service
+
+**Service name:** `camera.multisource_reload_images`\
+_This services will reload the images in use, useful if you change the content of one of the dirs._
