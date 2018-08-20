@@ -1,6 +1,8 @@
 # camera.multisource
 
 A camera platform that generate a camera feed from multiple sources.
+
+This platform will rotate the camera feeds, showing a 10 second feed from each camera before displaying the next one.
   
 To get started put `/custom_components/camera/multisource.py` here:  
 `<config directory>/custom_components/camera/multisource.py`  
