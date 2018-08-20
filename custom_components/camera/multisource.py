@@ -13,7 +13,7 @@ import voluptuous as vol
 import homeassistant.helpers.config_validation as cv
 from homeassistant.components.camera import (PLATFORM_SCHEMA, DOMAIN, Camera)
 
-__version__ = '0.1.0'
+__version__ = '0.1.1'
 _LOGGER = logging.getLogger(__name__)
 
 CONF_NAME = 'name'
@@ -29,7 +29,7 @@ PLATFORM_IMAGES = str(PLATFORM_NAME).lower() + '_images'
 DEFAULT_INTERVAL = 5
 
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
-    vol.Optional(CONF_NAME, default=PLATFOM_NAME): cv.string,
+    vol.Optional(CONF_NAME, default=PLATFORM_NAME): cv.string,
     vol.Optional(CONF_INTERVAL, default=DEFAULT_INTERVAL): cv.string,
     vol.Optional(CONF_URLS, default='None'):
         vol.All(cv.ensure_list, [cv.string]),
@@ -42,17 +42,18 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
 def setup_platform(hass, config, add_devices, discovery_info=None):
     """Set up the Camera that works with local files."""
     name = config.get(CONF_NAME)
+    interval = config.get(CONF_INTERVAL)
     urls = config.get(CONF_URLS)
     images = config.get(CONF_IMAGES)
     dirs = config.get(CONF_DIRS)
-    camera = WebimagesCamera(hass, name, urls, images, dirs)
+    camera = WebimagesCamera(hass, name, interval, urls, images, dirs)
 
     def reload_images_service(call):
         """Reload images."""
         _LOGGER.debug('Reloading images with service call.')
         camera.gather_images()
         return True
-    hass.services.register(DOMAIN,'multisource_reload_images', reload_images_service)
+    hass.services.register(DOMAIN, 'multisource_reload_images', reload_images_service)
     add_devices([camera])
 
 
