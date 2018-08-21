@@ -1,38 +1,37 @@
 # camera.multisource
 
-A camera platform that generate a camera feed from multiple sources.
+A camera platform that generate a camera feed from multiple image sources.
 
-This platform will rotate the camera feeds, showing a 10 second feed from each camera before displaying the next one.
-  
-To get started put `/custom_components/camera/multisource.py` here:  
-`<config directory>/custom_components/camera/multisource.py`  
-  
-**Example configuration.yaml:**
+This platform will display a feed that rotates through a list of images at a
+set interval.
+
+To get started put `/custom_components/camera/multisource.py` here:
+`<config directory>/custom_components/camera/multisource.py`
+
+**Example `configuration.yaml`:**
 
 ```yaml
 camera:
   - platform: multisource
-    urls:
+    name: "Image Gallery"
+    interval: 10
+    images:
       - https://example.com/image1.jpg
       - https://example.com/image2.png
-    dirs:
-      - /www/images/dir1
-      - /www/images/dir2/
-    files:
-      - /www/image1.jpg
-      - /www/image2.png
+      - /config/www/images/dir1
+      - /config/www/images/dir2
+      - /config/www/image1.jpg
+      - /config/www/image2.png
 ```
 
-**Configuration variables:**  
+**Configuration variables:**
 
-key | description  
-:--- | :---  
-**platform (Required)** | The camera platform name.  
+key | description
+:--- | :---
+**platform (Required)** | The camera platform name (`multisource`).
 **name (Optional)** | Set the a custom name for the platform entity.
-**interval (Optional)** | The interval in minutes to fetch new imgages, defaults to `5`.
-**urls (Optional)** | A list of urls to web hosted images.
-**dirs (Optional)** | A list of dirs with images, the path is relative to you HA config dir.
-**files (Optional)** | A list of imagefiles, the path is relative to you HA config dir.
+**interval (Optional)** | The interval (in seconds) to display each image, defaults to `300`.
+**images (Required)** | A list of image URLs, dirs, and/or files.
 
 ## Service
 
