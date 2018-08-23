@@ -7,89 +7,111 @@ https://github.com/custom-components/camera.multisource
 @todo Convert to async.
 @todo Implement checking files and directories against whitelist_external_dirs.
 """
+import asyncio
 import logging
+from datetime import timedelta
+from random import choice
+
+import aiohttp
+import async_timeout
 import os
-import time
-import random
-import requests
 import voluptuous as vol
 
 import homeassistant.helpers.config_validation as cv
+from homeassistant.const import (CONF_NAME, ATTR_ENTITY_ID)
 from homeassistant.components.camera import (PLATFORM_SCHEMA, DOMAIN, Camera)
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.service import extract_entity_ids
+from homeassistant.util import Throttle
 
-__version__ = '0.2.0'
+
+__version__ = '0.3.0'
 _LOGGER = logging.getLogger(__name__)
 
-CONF_NAME = 'name'
 CONF_INTERVAL = 'interval'
 CONF_IMAGES = 'images'
 
 PLATFORM_NAME = 'Multisource'
 
-DEFAULT_INTERVAL = 300
-
 SERVICE_RELOAD = 'multisource_reload_images'
+
+MULTISOURCE_DATA = "multisource"
+ENTITIES = "entities"
 
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
     vol.Optional(CONF_NAME, default=PLATFORM_NAME): cv.string,
-    vol.Optional(CONF_INTERVAL, default=DEFAULT_INTERVAL): cv.positive_int,
+    vol.Optional(CONF_INTERVAL, default=timedelta(seconds=300)):
+        vol.All(cv.time_period, cv.positive_timedelta),
     vol.Required(CONF_IMAGES):
         vol.All(cv.ensure_list, [vol.Any(cv.string, cv.isfile, cv.isdir)]),
 })
 
-def setup_platform(hass, config, add_devices, discovery_info=None):
-    """Set up the Camera that works with local files."""
-    name = config.get(CONF_NAME)
-    interval = config.get(CONF_INTERVAL)
-    images = config.get(CONF_IMAGES)
+SERVICE_RELOAD_SCHEMA = vol.Schema({
+    ATTR_ENTITY_ID: cv.entity_ids,
+})
 
-    camera = MultisourceCamera(hass, name, interval, images)
 
-    def reload_images_service(call):
-        """Reload images."""
+@asyncio.coroutine
+def async_setup_platform(hass, config, async_add_devices, discovery_info=None):
+    """Set up an Multisource Camera."""
+
+    def reload_images_service(service):
+        """Handle reload images service call."""
         _LOGGER.debug("Reloading images with service call.")
-        camera.load_images()
-        return True
 
-    hass.services.register(DOMAIN, SERVICE_RELOAD, reload_images_service)
-    add_devices([camera])
+        all_cameras = hass.data[MULTISOURCE_DATA][ENTITIES]
+        entity_ids = extract_entity_ids(hass, service)
+        target_cameras = []
+        if not entity_ids:
+            target_cameras = all_cameras
+        else:
+            target_cameras = [camera for camera in all_cameras
+                              if camera.entity_id in entity_ids]
+        for camera in target_cameras:
+            camera.reload_images()
+
+    hass.services.async_register(DOMAIN, SERVICE_RELOAD, reload_images_service,
+                                 schema=SERVICE_RELOAD_SCHEMA)
+
+    if discovery_info:
+        config = PLATFORM_SCHEMA(discovery_info)
+    async_add_devices([MultisourceCamera(hass, config)], True)
+
 
 class MultisourceCamera(Camera):
     """Representation of the camera."""
 
-    def __init__(self, hass, name, interval, images):
+    def __init__(self, hass, config):
         """Initialize Multisource Camera component."""
         super().__init__()
         self.hass = hass
-        self._name = name
-        self._images = images
+        self._name = config[CONF_NAME]
+        self._images = config[CONF_IMAGES]
         self._image = None
         self._data = []
-        self._lastchanged = 0
-        self._interval = int(interval)
+        self._interval = config[CONF_INTERVAL]
         self.is_streaming = False
-        self._config_path = self.hass.config.path()
-        self.load_images()
-        self.update_feed()
+        self.update_feed = Throttle(self._interval)(self._update_feed)
+        self.reload_images()
 
     @property
     def name(self):
         """Return the name of this camera."""
         return self._name
 
-    def camera_image(self):
-        """Return image response."""
+    async def async_added_to_hass(self):
+        """Callback when entity is added to hass."""
+        if MULTISOURCE_DATA not in self.hass.data:
+            self.hass.data[MULTISOURCE_DATA] = {}
+            self.hass.data[MULTISOURCE_DATA][ENTITIES] = []
+        self.hass.data[MULTISOURCE_DATA][ENTITIES].append(self)
+
+    @asyncio.coroutine
+    def async_camera_image(self):
         self.update_feed()
         return self._image
 
-    def update_feed(self):
-        """Update image if interval has passed."""
-        if time.time() - self._lastchanged >= self._interval:
-            _LOGGER.debug("Updating camera feed.")
-            self._lastchanged = time.time()
-            self._image = random.choice(self._data)
-
-    def load_images(self):
+    def reload_images(self):
         """Get images from config."""
         def load_image_dir(image_dir):
             """Get images from dir."""
@@ -106,15 +128,22 @@ class MultisourceCamera(Camera):
             with open(image_file, 'rb') as f:
                 return f.read()
 
+        @asyncio.coroutine
         def load_image_url(image_url):
             """Get image from URL."""
             try:
-                file_source = requests.get(image_url)
-                if file_source.status_code == 200:
-                    return file_source.content
-            except requests.exceptions.ConnectionError:
-                _LOGGER.error("Could not download image from '%s'", image_url)
-            return None
+                websession = async_get_clientsession(self.hass)
+                with async_timeout.timeout(10, loop=self.hass.loop):
+                    response = yield from websession.get(image_url)
+                image_data = yield from response.read()
+            except asyncio.TimeoutError:
+                _LOGGER.error("Timeout getting camera image")
+                return None
+            except aiohttp.ClientError as err:
+                _LOGGER.error("Error getting new camera image: %s", err)
+                return None
+
+            return image_data
 
         self._data = []
         for image in self._images:
@@ -130,3 +159,8 @@ class MultisourceCamera(Camera):
 
             if image_data:
                 self._data.extend(image_data)
+
+    def _update_feed(self):
+        """Update image if interval has passed."""
+        _LOGGER.debug("Updating camera feed.")
+        self._image = choice(self._data)
