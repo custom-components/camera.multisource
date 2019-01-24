@@ -5,8 +5,8 @@ A camera platform that generate a camera feed from multiple image sources.
 This platform will display a feed that rotates through a list of images at a
 set interval.
 
-To get started put `/custom_components/camera/multisource.py` here:
-`<config directory>/custom_components/camera/multisource.py`
+To get started put `/custom_components/multisource/camera.py` here:
+`<config directory>/custom_components/multisource/camera.py`
 
 **Example `configuration.yaml`:**
 
